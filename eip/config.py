@@ -1,12 +1,14 @@
+import os
 from pathlib import Path
+
 from pydantic import BaseModel
 
 
 class Settings(BaseModel):
-    data_dir: Path = Path("data")
-    anthropic_api_key: str = ""
-    default_model: str = "claude-sonnet-4-6"
-    log_level: str = "INFO"
+    data_dir: Path = Path(os.getenv("EIP_DATA_DIR", "data"))
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    default_model: str = os.getenv("EIP_DEFAULT_MODEL", "claude-sonnet-4-6")
+    log_level: str = os.getenv("EIP_LOG_LEVEL", "INFO")
 
     @property
     def jobs_dir(self) -> Path:
