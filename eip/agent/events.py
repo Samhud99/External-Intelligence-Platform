@@ -11,6 +11,8 @@ class EventType(Enum):
     PROPOSAL = "proposal"
     DONE = "done"
     ERROR = "error"
+    ESCALATION_PROPOSAL = "escalation_proposal"
+    FAILURE = "failure"
 
 
 class AgentEvent:
@@ -28,6 +30,12 @@ class AgentEvent:
         config: Optional[Dict] = None,
         sample_data: Optional[List[Dict]] = None,
         status: Optional[str] = None,
+        current_tier: Optional[str] = None,
+        proposed_tier: Optional[str] = None,
+        failure_code: Optional[str] = None,
+        user_message: Optional[str] = None,
+        next_steps: Optional[List[Dict]] = None,
+        technical_details: Optional[Dict] = None,
     ) -> None:
         self.type = type
         self.message = message
@@ -41,6 +49,12 @@ class AgentEvent:
         self.config = config
         self.sample_data = sample_data
         self.status = status
+        self.current_tier = current_tier
+        self.proposed_tier = proposed_tier
+        self.failure_code = failure_code
+        self.user_message = user_message
+        self.next_steps = next_steps
+        self.technical_details = technical_details
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"type": self.type.value}
@@ -48,6 +62,8 @@ class AgentEvent:
             "message", "url", "title", "content_length",
             "selectors", "sample_items", "count",
             "job", "config", "sample_data", "status",
+            "current_tier", "proposed_tier",
+            "failure_code", "user_message", "next_steps", "technical_details",
         ]:
             val = getattr(self, key)
             if val is not None:
