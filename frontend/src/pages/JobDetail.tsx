@@ -106,6 +106,12 @@ export default function JobDetail() {
                 <dt className="text-gray-500">Strategy</dt>
                 <dd className="text-gray-900 font-medium">{config.strategy}</dd>
               </div>
+              {config.tier && (
+                <div>
+                  <dt className="text-gray-500">Extraction Tier</dt>
+                  <dd className="text-gray-900 font-medium capitalize">{config.tier}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-gray-500">Selectors</dt>
                 <dd className="text-gray-900 font-mono text-xs">
@@ -118,6 +124,42 @@ export default function JobDetail() {
           )}
         </dl>
       </div>
+
+      {/* Health Indicator */}
+      {job.consecutive_failures && job.consecutive_failures > 0 && (
+        <div className={`rounded-lg p-4 mb-6 ${
+          job.consecutive_failures >= 3
+            ? 'bg-red-50 border border-red-200'
+            : 'bg-yellow-50 border border-yellow-200'
+        }`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <p className={`font-medium ${
+                job.consecutive_failures >= 3 ? 'text-red-800' : 'text-yellow-800'
+              }`}>
+                {job.consecutive_failures >= 3
+                  ? 'Extraction is failing — site may have changed'
+                  : `${job.consecutive_failures} consecutive extraction issue(s)`
+                }
+              </p>
+              <p className="text-sm text-gray-600 mt-1">
+                {job.consecutive_failures >= 3
+                  ? 'The agent needs to re-discover how to extract data from this site.'
+                  : 'The agent will attempt re-discovery if failures continue.'
+                }
+              </p>
+            </div>
+            {job.consecutive_failures >= 3 && (
+              <button
+                onClick={() => navigate(`/jobs/new?rediscover=${id}`)}
+                className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700"
+              >
+                Re-discover
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-3 mb-8">

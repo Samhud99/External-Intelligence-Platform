@@ -8,6 +8,7 @@ const statusColors: Record<string, string> = {
   error: 'bg-red-100 text-red-800',
   running: 'bg-blue-100 text-blue-800',
   completed: 'bg-gray-100 text-gray-800',
+  needs_reagent: 'bg-orange-100 text-orange-800',
 };
 
 export default function StatusBadge({ status }: StatusBadgeProps) {
