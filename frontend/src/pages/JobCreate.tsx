@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { connectSSE } from '../api/sse';
-import type { AgentEvent } from '../api/types';
+import type { AgentEvent, NextStep } from '../api/types';
 import AgentFeed from '../components/AgentFeed';
 import ExtractionPreview from '../components/ExtractionPreview';
 import ChatInput from '../components/ChatInput';
@@ -41,6 +41,8 @@ export default function JobCreate() {
           } else if (event.type === 'error') {
             setError(event.message || 'An error occurred');
             setPhase('input');
+          } else if (event.type === 'failure') {
+            // Failure stays visible in feed — don't change phase
           }
         },
         () => {
@@ -89,6 +91,51 @@ export default function JobCreate() {
     [sessionId],
   );
 
+  const handleEscalationApprove = useCallback(
+    async (tier: string) => {
+      if (!sessionId) return;
+      try {
+        await api.sendMessage(sessionId, `Approved. Please try using ${tier} to extract the data.`);
+        setPhase('running');
+      } catch {
+        setError('Failed to approve escalation');
+      }
+    },
+    [sessionId],
+  );
+
+  const handleEscalationReject = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.rejectSession(sessionId);
+      setPhase('input');
+      setSessionId(null);
+      setEvents([]);
+      setProposal(null);
+    } catch {
+      setError('Failed to reject');
+    }
+  }, [sessionId]);
+
+  const handleFailureAction = useCallback(
+    async (step: NextStep) => {
+      if (!sessionId) return;
+      if (step.type === 'retry') {
+        handleSubmit();
+      } else if (step.type === 'change_url') {
+        setPhase('input');
+        setEvents([]);
+      } else if (step.type === 'escalate') {
+        await api.sendMessage(sessionId, 'Please try the next extraction tier.');
+        setPhase('running');
+      } else {
+        await api.sendMessage(sessionId, `User action: ${step.label}`);
+        setPhase('running');
+      }
+    },
+    [sessionId, handleSubmit],
+  );
+
   return (
     <div className="max-w-4xl mx-auto">
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Create Monitoring Job</h2>
@@ -129,7 +176,12 @@ export default function JobCreate() {
       {events.length > 0 && (
         <div className="mt-6">
           <h3 className="text-sm font-medium text-gray-500 mb-3">Agent Activity</h3>
-          <AgentFeed events={events} />
+          <AgentFeed
+            events={events}
+            onEscalationApprove={handleEscalationApprove}
+            onEscalationReject={handleEscalationReject}
+            onFailureAction={handleFailureAction}
+          />
         </div>
       )}
 
