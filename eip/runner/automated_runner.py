@@ -1,3 +1,5 @@
+import asyncio as _asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -9,6 +11,10 @@ from bs4 import BeautifulSoup
 from eip.agent.browser import BrowserTool
 from eip.runner.change_detector import detect_changes
 from eip.store.json_store import JsonStore
+
+logger = logging.getLogger(__name__)
+
+RETRY_DELAYS = [1, 4, 16]  # Exponential backoff: 1s, 4s, 16s
 
 
 def extract_items(html: str, config: dict) -> List[Dict]:
@@ -117,17 +123,32 @@ async def run_job(job_id: str, store: JsonStore) -> Dict:
                 }
             html = browser_result["html"]
         else:
-            # Default: HTTP fetch (tier css)
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-                response = await client.get(target_url)
-                response.raise_for_status()
-            html = response.text
-    except httpx.HTTPError as e:
-        return {"success": False, "error": f"HTTP error: {e}", "run_id": run_id}
+            # Default: HTTP fetch (tier css) with retry on transient errors
+            html = None
+            last_error = None
+            for attempt, delay in enumerate(RETRY_DELAYS):
+                try:
+                    async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                        response = await client.get(target_url)
+                        response.raise_for_status()
+                    html = response.text
+                    break
+                except httpx.HTTPError as e:
+                    last_error = e
+                    logger.warning(f"Attempt {attempt + 1} failed for {target_url}: {e}")
+                    if delay > 0:
+                        await _asyncio.sleep(delay)
+
+            if html is None:
+                return {"success": False, "error": f"HTTP error: {last_error}", "run_id": run_id}
+    except Exception as e:
+        return {"success": False, "error": f"Unexpected error: {e}", "run_id": run_id}
 
     items = extract_items(html, config)
 
     if not items:
+        failures = job.get("consecutive_failures", 0) + 1
+        job["consecutive_failures"] = failures
         job["status"] = "needs_reagent"
         store.save("jobs", job_id, job)
         return {
@@ -135,6 +156,7 @@ async def run_job(job_id: str, store: JsonStore) -> Dict:
             "error": "Extraction returned no items — site may have changed",
             "run_id": run_id,
             "job_id": job_id,
+            "consecutive_failures": failures,
         }
 
     # Load previous run for change detection
@@ -146,6 +168,11 @@ async def run_job(job_id: str, store: JsonStore) -> Dict:
 
     items_with_changes = detect_changes(items, previous_items)
     new_count = sum(1 for i in items_with_changes if i.get("is_new"))
+
+    # Reset failure counter on success
+    if job.get("consecutive_failures", 0) > 0:
+        job["consecutive_failures"] = 0
+        store.save("jobs", job_id, job)
 
     result = {
         "run_id": run_id,
