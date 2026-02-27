@@ -1,9 +1,11 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from eip.agent.events import AgentEvent, EventType
+from eip.agent.memory import AgentMemory
 from eip.agent.provider import ModelProvider
 from eip.agent.tools import AgentTools
 from eip.store.json_store import JsonStore
@@ -14,14 +16,24 @@ SYSTEM_PROMPT = """\
 You are an AI agent that sets up web monitoring jobs. The user will describe what external \
 information they want to monitor. Your job is to:
 
-1. Fetch the target web page to understand its structure.
-2. Identify the right CSS selectors to extract the information the user wants.
-3. Test your selectors by calling extract_with_selectors to verify they work.
-4. If the extraction looks good, save the job using save_job.
-5. If the extraction doesn't look right, try different selectors and test again.
+1. First, call recall() to check if you have any prior knowledge about this site's domain.
+2. Fetch the target web page to understand its structure.
+3. Identify the right CSS selectors to extract the information the user wants.
+4. Test your selectors by calling extract_with_selectors to verify they work.
+5. If the extraction looks good, save the job using save_job.
+6. If CSS extraction returns 0 items or the page appears to use JavaScript rendering, \
+explain the issue to the user and recommend trying browse_page (Playwright) instead.
+7. If Playwright is approved and works, save the job. Remember what you learned about this site.
+8. Always call remember() to record what you learned about a site — whether something worked \
+or failed, what tier was needed, what selectors were effective.
 
-Be methodical: fetch the page first, study the HTML structure, pick selectors, \
-test them, iterate if needed, then save.
+Strategy tiers (try in order, get user approval before escalating):
+- Tier 1: fetch_page + extract_with_selectors (cheapest, for static HTML)
+- Tier 2: browse_page + extract_with_selectors (medium cost, for JS-rendered sites)
+- Tier 3: Computer use (most expensive, for complex interactions — tell the user if needed)
+
+When something fails, be specific about WHY it failed and WHAT the user can do about it. \
+Never just say "it didn't work". Give concrete next steps.
 
 For the schedule, choose an appropriate cron expression based on the content type:
 - News/media releases: every 4 hours (0 */4 * * *)
@@ -128,9 +140,22 @@ class SetupAgent:
         last_extraction = None
         last_selectors = None
 
+        # Load agent memory for the domain
+        memory = AgentMemory(store=self.store)
+        domain = ""
+        url_match = re.search(r'https?://([^/\s]+)', user_request)
+        if url_match:
+            domain = url_match.group(1)
+
+        system = SYSTEM_PROMPT
+        if domain:
+            memory_text = memory.recall_as_text(domain)
+            if memory_text:
+                system += f"\n\nYou have prior knowledge about {domain}:\n{memory_text}"
+
         for turn in range(self.max_turns):
             response = await self.provider.complete(
-                system=SYSTEM_PROMPT,
+                system=system,
                 messages=messages,
                 tools=tool_defs,
             )
