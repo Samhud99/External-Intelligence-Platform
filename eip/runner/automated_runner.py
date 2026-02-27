@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from eip.agent.browser import BrowserTool
 from eip.runner.change_detector import detect_changes
 from eip.store.json_store import JsonStore
 
@@ -101,14 +102,30 @@ async def run_job(job_id: str, store: JsonStore) -> Dict:
     target_url = job["target_url"]
     run_id = f"run_{uuid.uuid4().hex[:12]}"
 
+    tier = config.get("tier", "css")
+
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-            response = await client.get(target_url)
-            response.raise_for_status()
+        if tier == "playwright":
+            browser = BrowserTool()
+            actions = config.get("playwright_actions")
+            browser_result = await browser.browse_page(target_url, actions=actions)
+            if "error" in browser_result:
+                return {
+                    "success": False,
+                    "error": f"Browser error: {browser_result['error']}",
+                    "run_id": run_id,
+                }
+            html = browser_result["html"]
+        else:
+            # Default: HTTP fetch (tier css)
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                response = await client.get(target_url)
+                response.raise_for_status()
+            html = response.text
     except httpx.HTTPError as e:
         return {"success": False, "error": f"HTTP error: {e}", "run_id": run_id}
 
-    items = extract_items(response.text, config)
+    items = extract_items(html, config)
 
     if not items:
         job["status"] = "needs_reagent"

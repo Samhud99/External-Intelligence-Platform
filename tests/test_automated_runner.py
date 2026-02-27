@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from pytest_httpx import HTTPXMock
@@ -94,3 +95,49 @@ async def test_run_job_missing_config_returns_error(
 
     assert result["success"] is False
     assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_run_job_playwright_tier(tmp_path: Path) -> None:
+    """When config has tier=playwright, runner should use browser tool."""
+    store = JsonStore(base_dir=tmp_path)
+    store.save(
+        "jobs",
+        "job_pw",
+        {
+            "id": "job_pw",
+            "name": "JS Site",
+            "target_url": "https://spa-site.com",
+            "status": "active",
+        },
+    )
+    store.save(
+        "configs",
+        "job_pw",
+        {
+            "job_id": "job_pw",
+            "strategy": "css_selector",
+            "tier": "playwright",
+            "selectors": {"item_container": ".item", "title": "h2"},
+            "base_url": "https://spa-site.com",
+            "playwright_actions": [
+                {"action": "wait_for_selector", "selector": ".item"},
+            ],
+        },
+    )
+
+    with patch("eip.runner.automated_runner.BrowserTool") as MockBT:
+        mock_bt = AsyncMock()
+        mock_bt.browse_page = AsyncMock(
+            return_value={
+                "html": '<div class="item"><h2>Article 1</h2></div>',
+                "title": "SPA Site",
+                "url": "https://spa-site.com",
+            }
+        )
+        MockBT.return_value = mock_bt
+        result = await run_job("job_pw", store)
+
+    assert result["success"] is True
+    assert result["items_total"] == 1
+    mock_bt.browse_page.assert_called_once()
