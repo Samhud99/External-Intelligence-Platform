@@ -1,12 +1,16 @@
+import asyncio
+import json
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
+from eip.api.sessions import SessionManager
 from eip.store.json_store import JsonStore
 
-# Module-level store reference, set by create_jobs_router
 _store = None
+_session_manager = None
 
 
 class CreateJobRequest(BaseModel):
@@ -16,6 +20,10 @@ class CreateJobRequest(BaseModel):
 class PatchJobRequest(BaseModel):
     status: Optional[str] = None
     schedule: Optional[str] = None
+
+
+class MessageRequest(BaseModel):
+    content: str
 
 
 def get_setup_agent():
@@ -31,9 +39,27 @@ def get_setup_agent():
     return SetupAgent(provider=provider, store=_store)
 
 
-def create_jobs_router(store: JsonStore) -> APIRouter:
-    global _store
+async def _run_agent_streaming(session_id: str, request: str) -> None:
+    """Background task: run the agent and push events to the session's event queue."""
+    agent = get_setup_agent()
+    input_queue = _session_manager.get_input_queue(session_id)
+    try:
+        async for event in agent.run_streaming(request, input_queue):
+            _session_manager.send_event(session_id, event)
+    except Exception as e:
+        from eip.agent.events import AgentEvent, EventType
+        _session_manager.send_event(
+            session_id,
+            AgentEvent(type=EventType.ERROR, message=str(e)),
+        )
+    finally:
+        _session_manager.send_event(session_id, None)  # Signal stream end
+
+
+def create_jobs_router(store: JsonStore, session_manager: SessionManager) -> APIRouter:
+    global _store, _session_manager
     _store = store
+    _session_manager = session_manager
     r = APIRouter()
 
     @r.get("/jobs")
@@ -50,9 +76,53 @@ def create_jobs_router(store: JsonStore) -> APIRouter:
 
     @r.post("/jobs/create")
     async def create_job(body: CreateJobRequest):
-        agent = get_setup_agent()
-        result = await agent.run(body.request)
-        return result
+        session_id = _session_manager.create(body.request)
+        asyncio.create_task(_run_agent_streaming(session_id, body.request))
+        return {"session_id": session_id}
+
+    @r.get("/jobs/create/{session_id}/stream")
+    async def stream_events(session_id: str):
+        session = _session_manager.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        event_queue = _session_manager.get_event_queue(session_id)
+
+        async def event_generator():
+            while True:
+                event = await event_queue.get()
+                if event is None:
+                    break
+                yield {
+                    "event": event.type.value,
+                    "data": json.dumps(event.to_dict(), default=str),
+                }
+
+        return EventSourceResponse(event_generator())
+
+    @r.post("/jobs/create/{session_id}/message")
+    async def send_message(session_id: str, body: MessageRequest):
+        session = _session_manager.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        _session_manager.send_message(session_id, {"type": "message", "content": body.content})
+        return {"status": "sent"}
+
+    @r.post("/jobs/create/{session_id}/confirm")
+    async def confirm_session(session_id: str):
+        session = _session_manager.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        _session_manager.send_message(session_id, {"type": "confirm"})
+        return {"status": "confirmed"}
+
+    @r.post("/jobs/create/{session_id}/reject")
+    async def reject_session(session_id: str):
+        session = _session_manager.get(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        _session_manager.cancel(session_id)
+        return {"status": "rejected"}
 
     @r.post("/jobs/{job_id}/run")
     async def trigger_run(job_id: str):

@@ -106,15 +106,9 @@ def test_get_single_result(seeded_client: TestClient) -> None:
     assert response.json()["run_id"] == "run_1"
 
 
-def test_create_job_invokes_agent(client: TestClient, tmp_store: JsonStore) -> None:
-    mock_result = {
-        "success": True,
-        "job_id": "job_new",
-        "summary": "Created monitoring job",
-    }
+def test_create_job_returns_session(client: TestClient, tmp_store: JsonStore) -> None:
     with patch("eip.api.jobs.get_setup_agent") as mock_get_agent:
         mock_agent = AsyncMock()
-        mock_agent.run = AsyncMock(return_value=mock_result)
         mock_get_agent.return_value = mock_agent
 
         response = client.post(
@@ -123,5 +117,4 @@ def test_create_job_invokes_agent(client: TestClient, tmp_store: JsonStore) -> N
         )
 
     assert response.status_code == 200
-    assert response.json()["success"] is True
-    assert response.json()["job_id"] == "job_new"
+    assert "session_id" in response.json()
