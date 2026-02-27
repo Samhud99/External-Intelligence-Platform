@@ -5,13 +5,16 @@ export interface Job {
   schedule: string;
   status: string;
   created_at: string;
+  consecutive_failures?: number;
 }
 
 export interface ExtractionConfig {
   job_id: string;
   strategy: string;
+  tier?: string;
   selectors: Record<string, string>;
   base_url: string;
+  playwright_actions?: Record<string, unknown>[];
 }
 
 export interface JobDetail {
@@ -41,6 +44,11 @@ export interface CreateSessionResponse {
   session_id: string;
 }
 
+export interface NextStep {
+  type: string;
+  label: string;
+}
+
 export interface AgentEvent {
   type: string;
   message?: string;
@@ -54,4 +62,10 @@ export interface AgentEvent {
   config?: Record<string, unknown>;
   sample_data?: Record<string, unknown>[];
   status?: string;
+  current_tier?: string;
+  proposed_tier?: string;
+  failure_code?: string;
+  user_message?: string;
+  next_steps?: NextStep[];
+  technical_details?: Record<string, unknown>;
 }

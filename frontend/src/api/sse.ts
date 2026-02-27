@@ -19,6 +19,8 @@ export function connectSSE(
     'proposal',
     'done',
     'error',
+    'escalation_proposal',
+    'failure',
   ];
 
   for (const type of eventTypes) {
@@ -27,7 +29,7 @@ export function connectSSE(
         const data: AgentEvent = JSON.parse(e.data);
         onEvent(data);
 
-        if (type === 'done' || type === 'error') {
+        if (type === 'done' || type === 'error' || type === 'failure') {
           eventSource.close();
           onDone?.();
         }
