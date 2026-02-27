@@ -76,4 +76,45 @@ def test_save_job(tools: AgentTools, store: JsonStore) -> None:
 def test_tool_definitions(tools: AgentTools) -> None:
     defs = tools.get_tool_definitions()
     names = {d["name"] for d in defs}
-    assert names == {"fetch_page", "extract_with_selectors", "save_job"}
+    assert names == {
+        "fetch_page",
+        "extract_with_selectors",
+        "save_job",
+        "browse_page",
+        "remember",
+        "recall",
+    }
+
+
+def test_tool_definitions_include_v3_tools(tmp_path: Path) -> None:
+    store = JsonStore(base_dir=tmp_path)
+    tools = AgentTools(store=store)
+    defs = tools.get_tool_definitions()
+    names = [d["name"] for d in defs]
+    assert "browse_page" in names
+    assert "remember" in names
+    assert "recall" in names
+
+
+@pytest.mark.asyncio
+async def test_remember_tool(tmp_path: Path) -> None:
+    store = JsonStore(base_dir=tmp_path)
+    tools = AgentTools(store=store)
+    result = await tools.execute_tool(
+        "remember",
+        {"domain": "example.com", "key": "site_profile", "value": "Static HTML"},
+    )
+    assert result["status"] == "remembered"
+
+
+@pytest.mark.asyncio
+async def test_recall_tool(tmp_path: Path) -> None:
+    store = JsonStore(base_dir=tmp_path)
+    tools = AgentTools(store=store)
+    await tools.execute_tool(
+        "remember",
+        {"domain": "example.com", "key": "site_profile", "value": "Static HTML"},
+    )
+    result = await tools.execute_tool("recall", {"domain": "example.com"})
+    assert len(result["entries"]) == 1
+    assert result["entries"][0]["value"] == "Static HTML"

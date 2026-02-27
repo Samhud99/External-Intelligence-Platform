@@ -1,9 +1,11 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
+from eip.agent.browser import BrowserTool
+from eip.agent.memory import AgentMemory
 from eip.runner.automated_runner import extract_items
 from eip.store.json_store import JsonStore
 
@@ -11,6 +13,8 @@ from eip.store.json_store import JsonStore
 class AgentTools:
     def __init__(self, store: JsonStore) -> None:
         self.store = store
+        self.memory = AgentMemory(store=store)
+        self.browser = BrowserTool()
 
     async def fetch_page(self, url: str) -> Dict:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
@@ -58,6 +62,19 @@ class AgentTools:
 
         return {"job_id": job_id, "job": job, "config": config}
 
+    async def browse_page(
+        self, url: str, actions: Optional[List[Dict]] = None
+    ) -> Dict:
+        return await self.browser.browse_page(url=url, actions=actions)
+
+    def remember(self, domain: str, key: str, value: str) -> Dict:
+        self.memory.remember(domain=domain, key=key, value=value)
+        return {"status": "remembered", "domain": domain, "key": key}
+
+    def recall(self, domain: str) -> Dict:
+        entries = self.memory.recall(domain=domain)
+        return {"domain": domain, "entries": entries}
+
     async def execute_tool(self, name: str, arguments: Dict) -> Any:
         if name == "fetch_page":
             return await self.fetch_page(**arguments)
@@ -65,6 +82,12 @@ class AgentTools:
             return await self.extract_with_selectors(**arguments)
         elif name == "save_job":
             return self.save_job(**arguments)
+        elif name == "browse_page":
+            return await self.browse_page(**arguments)
+        elif name == "remember":
+            return self.remember(**arguments)
+        elif name == "recall":
+            return self.recall(**arguments)
         else:
             return {"error": f"Unknown tool: {name}"}
 
@@ -151,6 +174,95 @@ class AgentTools:
                         },
                     },
                     "required": ["job_definition", "extraction_config"],
+                },
+            },
+            {
+                "name": "browse_page",
+                "description": (
+                    "Open a URL in a headless browser with full JavaScript "
+                    "rendering. Use this when fetch_page fails to capture "
+                    "dynamic content. Optionally supply a list of actions "
+                    "(click, fill, scroll, wait, wait_for_selector) to "
+                    "interact with the page before capturing its HTML."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to browse",
+                        },
+                        "actions": {
+                            "type": "array",
+                            "description": (
+                                "Optional list of browser actions to execute "
+                                "before capturing the page"
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {
+                                        "type": "string",
+                                        "enum": [
+                                            "click",
+                                            "fill",
+                                            "scroll",
+                                            "wait",
+                                            "wait_for_selector",
+                                        ],
+                                    },
+                                    "selector": {"type": "string"},
+                                    "value": {"type": "string"},
+                                },
+                                "required": ["action"],
+                            },
+                        },
+                    },
+                    "required": ["url"],
+                },
+            },
+            {
+                "name": "remember",
+                "description": (
+                    "Store a piece of knowledge about a domain for future "
+                    "use. Use this to save site profiles, login patterns, "
+                    "or selector strategies you have discovered."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "The domain this knowledge relates to (e.g. 'example.com')",
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "A short label for this piece of knowledge (e.g. 'site_profile')",
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "The knowledge to store",
+                        },
+                    },
+                    "required": ["domain", "key", "value"],
+                },
+            },
+            {
+                "name": "recall",
+                "description": (
+                    "Retrieve all stored knowledge about a domain. Use this "
+                    "at the start of a task to recall what you previously "
+                    "learned about a website."
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "description": "The domain to recall knowledge for (e.g. 'example.com')",
+                        },
+                    },
+                    "required": ["domain"],
                 },
             },
         ]
